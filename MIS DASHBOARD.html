@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Auto-Calculating Product Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #6366f1; /* Indigo */
+      --success: #10b981; /* Emerald */
+      --border: rgba(255,255,255,0.1);
+    }
+
+    body {
+      margin: 0;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+    }
+
+    /* --- Header --- */
+    header {
+      padding: 20px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+      background: #111827;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    /* --- Buttons & Inputs --- */
+    button, .file-upload-label {
+      background: var(--card);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s;
+      font-weight: 500;
+    }
+
+    button:hover, .file-upload-label:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    button.active {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+    }
+
+    input[type="file"] { display: none; }
+
+    /* --- Main Layout --- */
+    main {
+      padding: 32px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+
+    .wide { grid-column: span 2; }
+    @media (max-width: 768px) { .wide { grid-column: span 1; } }
+
+    /* --- Typography --- */
+    .kpi {
+      font-size: 36px;
+      font-weight: 700;
+      margin-top: 12px;
+      letter-spacing: -1px;
+    }
+    
+    .kpi-sm { font-size: 24px; }
+
+    .label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* --- Chart Area --- */
+    .chart-container {
+      position: relative;
+      height: 300px;
+      width: 100%;
+    }
+
+    /* --- Editor Section --- */
+    #editorSection {
+      display: none;
+      grid-column: 1 / -1;
+      animation: slideDown 0.3s ease;
+    }
+
+    @keyframes slideDown {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .editor-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+    }
+
+    .editor-table th {
+      text-align: left;
+      padding: 12px;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+
+    .editor-table td {
+      padding: 8px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+
+    .editor-input {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px;
+      border-radius: 4px;
+      width: 100%;
+      box-sizing: border-box;
+      font-family: inherit;
+    }
+
+    .editor-input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .auto-calc {
+      color: var(--success);
+      font-weight: 600;
+      font-family: monospace;
+      font-size: 14px;
+    }
+
+    footer {
+      text-align: center;
+      padding: 32px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Product Analytics</h1>
+  <div class="controls">
+    <label for="fileInput" class="file-upload-label">Upload CSV</label>
+    <input type="file" id="fileInput" accept=".csv" />
+    
+    <button onclick="loadDemoData()">Reset Demo</button>
+    <button id="editToggleBtn" onclick="toggleEditor()">Edit Data</button>
+  </div>
+</header>
+
+<main>
+  <div class="card">
+    <div class="label">Total Revenue</div>
+    <div class="kpi" id="revenue">₹0</div>
+  </div>
+
+  <div class="card">
+    <div class="label">Total Units Sold</div>
+    <div class="kpi" id="units">0</div>
+  </div>
+
+  <div class="card">
+    <div class="label">Top Performer</div>
+    <div class="kpi kpi-sm" id="bestProduct" style="padding-top:10px">–</div>
+  </div>
+
+  <div class="card wide">
+    <div class="label">Revenue Distribution</div>
+    <div class="chart-container">
+      <canvas id="revenueChart"></canvas>
+    </div>
+  </div>
+
+  <div class="card wide">
+    <div class="label">Sales Trend</div>
+    <div class="chart-container">
+      <canvas id="unitsChart"></canvas>
+    </div>
+  </div>
+
+  <div class="card" id="editorSection">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <div>
+        <div class="label">Live Data Editor</div>
+        <div style="font-size:12px; color:var(--muted); margin-top:4px;">
+          Adjust <b>Price</b> or <b>Units</b>. Revenue is calculated automatically.
+        </div>
+      </div>
+      <button onclick="addRow()">+ Add Product</button>
+    </div>
+    
+    <table class="editor-table">
+      <thead>
+        <tr>
+          <th style="width: 30%;">Product Name</th>
+          <th style="width: 20%;">Price per Unit (₹)</th>
+          <th style="width: 20%;">Units Sold</th>
+          <th style="width: 20%;">Total Revenue (Auto)</th>
+          <th style="width: 10%;">Action</th>
+        </tr>
+      </thead>
+      <tbody id="editorBody">
+        </tbody>
+    </table>
+  </div>
+</main>
+
+<footer>
+  MIS Dashboard • Auto-Calculation Enabled
+</footer>
+
+<script>
+  let revenueChartInstance, unitsChartInstance;
+  
+  // Data Structure: { Product: String, Price: Number, Units: Number }
+  let globalData = []; 
+
+  // --- 1. CSV Handling ---
+  document.getElementById('fileInput').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: results => {
+        globalData = results.data.map(row => {
+          const units = Number(row.Units) || 0;
+          const revenue = Number(row.Revenue) || 0;
+          const price = Number(row.Price); // If CSV has Price column
+          
+          // Logic: If Price is missing but Revenue exists, calculate Price.
+          // Otherwise default to 0.
+          let finalPrice = 0;
+          if (price) {
+            finalPrice = price;
+          } else if (revenue && units > 0) {
+            finalPrice = revenue / units;
+          }
+
+          return {
+            Product: row.Product || 'Unknown',
+            Units: units,
+            Price: finalPrice
+          };
+        });
+        updateDashboard();
+        renderEditorTable();
+      }
+    });
+  });
+
+  // --- 2. Dashboard Logic ---
+  function updateDashboard() {
+    // A. Aggregate Data (Handle duplicate product names)
+    const processed = {};
+    let totalRevenue = 0;
+    let totalUnits = 0;
+
+    globalData.forEach(row => {
+      if (!processed[row.Product]) processed[row.Product] = { units: 0, revenue: 0 };
+      
+      const rowRevenue = row.Units * row.Price; // The Magic Calculation
+      
+      processed[row.Product].units += row.Units;
+      processed[row.Product].revenue += rowRevenue;
+      
+      totalUnits += row.Units;
+      totalRevenue += rowRevenue;
+    });
+
+    // B. Update DOM KPIs
+    document.getElementById('revenue').textContent = `₹${totalRevenue.toLocaleString(undefined, {maximumFractionDigits:0})}`;
+    document.getElementById('units').textContent = totalUnits.toLocaleString();
+    
+    const sorted = Object.entries(processed).sort((a,b) => b[1].revenue - a[1].revenue);
+    document.getElementById('bestProduct').textContent = sorted.length ? sorted[0][0] : '–';
+
+    // C. Update Charts
+    renderCharts(processed);
+  }
+
+  function renderCharts(dataObj) {
+    const labels = Object.keys(dataObj);
+    const revenueData = labels.map(k => dataObj[k].revenue);
+    const unitsData = labels.map(k => dataObj[k].units);
+
+    if (revenueChartInstance) revenueChartInstance.destroy();
+    if (unitsChartInstance) unitsChartInstance.destroy();
+
+    const commonOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { grid: { color: 'rgba(255,255,255,0.05)' } },
+        x: { grid: { display: false } }
+      }
+    };
+
+    // Revenue Bar Chart
+    const ctxRev = document.getElementById('revenueChart').getContext('2d');
+    revenueChartInstance = new Chart(ctxRev, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Revenue (₹)',
+          data: revenueData,
+          backgroundColor: '#6366f1',
+          borderRadius: 4
+        }]
+      },
+      options: commonOptions
+    });
+
+    // Units Line Chart
+    const ctxUnit = document.getElementById('unitsChart').getContext('2d');
+    unitsChartInstance = new Chart(ctxUnit, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Units Sold',
+          data: unitsData,
+          borderColor: '#10b981',
+          backgroundColor: 'rgba(16, 185, 129, 0.1)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 4
+        }]
+      },
+      options: commonOptions
+    });
+  }
+
+  // --- 3. Editor Logic ---
+  function toggleEditor() {
+    const section = document.getElementById('editorSection');
+    const btn = document.getElementById('editToggleBtn');
+    
+    if (section.style.display === 'block') {
+      section.style.display = 'none';
+      btn.classList.remove('active');
+    } else {
+      section.style.display = 'block';
+      btn.classList.add('active');
+      renderEditorTable();
+    }
+  }
+
+  function renderEditorTable() {
+    const tbody = document.getElementById('editorBody');
+    tbody.innerHTML = '';
+
+    globalData.forEach((row, index) => {
+      const tr = document.createElement('tr');
+      const rowTotal = (row.Units * row.Price).toLocaleString();
+      
+      tr.innerHTML = `
+        <td>
+          <input class="editor-input" type="text" value="${row.Product}" 
+            oninput="updateRow(${index}, 'Product', this.value)">
+        </td>
+        <td>
+          <input class="editor-input" type="number" value="${row.Price}" 
+            oninput="updateRow(${index}, 'Price', this.value)">
+        </td>
+        <td>
+          <input class="editor-input" type="number" value="${row.Units}" 
+            oninput="updateRow(${index}, 'Units', this.value)">
+        </td>
+        <td class="auto-calc" id="row-calc-${index}">
+          ₹${rowTotal}
+        </td>
+        <td>
+          <button style="padding:4px 8px; font-size:11px; border-color:#ef4444; color:#ef4444;" 
+            onclick="deleteRow(${index})">Del</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function updateRow(index, field, value) {
+    // 1. Update Data Model
+    if (field === 'Product') {
+      globalData[index][field] = value;
+    } else {
+      globalData[index][field] = Number(value);
+    }
+    
+    // 2. Update the "Auto Calc Revenue" cell for this row immediately
+    const newTotal = globalData[index].Price * globalData[index].Units;
+    const calcCell = document.getElementById(`row-calc-${index}`);
+    if(calcCell) calcCell.textContent = `₹${newTotal.toLocaleString()}`;
+
+    // 3. Refresh Charts & KPIs (without redrawing the table to keep focus)
+    updateDashboard(); 
+  }
+
+  function deleteRow(index) {
+    globalData.splice(index, 1);
+    renderEditorTable(); // Re-render table needed here to fix indices
+    updateDashboard();
+  }
+
+  function addRow() {
+    globalData.push({ Product: 'New Product', Units: 0, Price: 100 });
+    renderEditorTable();
+    updateDashboard();
+  }
+
+  // --- 4. Demo Data ---
+  function loadDemoData() {
+    globalData = [
+      { Product: 'Dove Shampoo', Units: 120, Price: 200 },
+      { Product: 'Dove Conditioner', Units: 90, Price: 180 },
+      { Product: 'Dove Body Wash', Units: 150, Price: 250 },
+      { Product: 'Dove Soap', Units: 200, Price: 55 }
+    ];
+    updateDashboard();
+    renderEditorTable();
+  }
+  
+  // Init
+  loadDemoData();
+
+</script>
+</body>
+</html>
